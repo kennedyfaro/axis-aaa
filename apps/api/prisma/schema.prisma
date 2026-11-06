@@ -1,0 +1,255 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum GroupKind {
+  SYSTEM
+  CUSTOM
+}
+
+enum UserStatus {
+  ACTIVE
+  BLOCKED
+  EXPIRED
+  PENDING
+}
+
+enum AdminStatus {
+  ACTIVE
+  BLOCKED
+}
+
+enum DeviceVendor {
+  MIKROTIK
+  HUAWEI
+  NOKIA
+  ZTE
+  CISCO
+  OTHER
+}
+
+enum DeviceKind {
+  SWITCH
+  ROUTER
+  OLT
+  FIREWALL
+  WIRELESS_CONTROLLER
+}
+
+enum DeviceStatus {
+  ONLINE
+  OFFLINE
+  DEGRADED
+  PENDING
+}
+
+enum DeviceEnvironment {
+  PRODUCTION
+  STAGING
+  LAB
+}
+
+enum PolicyScope {
+  IDENTITY
+  DEVICE
+  SESSION
+}
+
+enum PolicyAction {
+  ALLOW
+  DENY
+  CHALLENGE
+}
+
+enum AuditResult {
+  SUCCESS
+  FAILURE
+}
+
+model Admin {
+  id           String         @id @default(cuid())
+  name         String
+  email        String         @unique
+  passwordHash String
+  totpSecret   String?
+  mfaEnabled   Boolean        @default(true)
+  status       AdminStatus    @default(ACTIVE)
+  tokenVersion Int            @default(0)
+  userId       String?        @unique
+  user         User?          @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  groups       Group[]        @relation("AdminGroups")
+  refreshTokens RefreshToken[]
+  lastLoginAt  DateTime?
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  @@map("admins")
+}
+
+model RefreshToken {
+  id           String    @id @default(cuid())
+  adminId      String
+  admin        Admin     @relation(fields: [adminId], references: [id], onDelete: Cascade)
+  tokenHash    String    @unique
+  expiresAt    DateTime
+  revokedAt    DateTime?
+  replacedBy   String?
+  ip           String?
+  userAgent    String?
+  createdAt    DateTime  @default(now())
+
+  @@index([adminId, revokedAt])
+  @@map("refresh_tokens")
+}
+
+model Group {
+  id                String       @id @default(cuid())
+  name              String
+  slug              String       @unique
+  description       String
+  kind              GroupKind    @default(CUSTOM)
+  permissions       String[]     @default([])
+  radiusGroupName   String?      @unique
+  radiusAttributes  Json?
+  users             User[]       @relation("UserGroups")
+  admins            Admin[]      @relation("AdminGroups")
+  devices           Device[]     @relation("DeviceGroups")
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+
+  @@map("groups")
+}
+
+model User {
+  id                  String     @id @default(cuid())
+  name                String
+  login               String     @unique
+  email               String     @unique
+  status              UserStatus @default(ACTIVE)
+  mfa                 Boolean    @default(false)
+  validFrom           DateTime?
+  validUntil          DateTime?
+  notes               String?
+  radiusNtHash        String?
+  passwordUpdatedAt   DateTime?
+  lastAuthAt          DateTime?
+  deletedAt           DateTime?
+  framedIpAddress     String?    @unique
+  ipPoolId            String?
+  ipPool              IpPool?    @relation(fields: [ipPoolId], references: [id], onDelete: SetNull)
+  ipAssignedAt        DateTime?
+  groups              Group[]    @relation("UserGroups")
+  admin               Admin?
+  createdAt           DateTime   @default(now())
+  updatedAt           DateTime   @updatedAt
+
+  @@index([status, deletedAt])
+  @@index([ipPoolId])
+  @@index([name])
+  @@map("users")
+}
+
+model IpPool {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  description String?
+  startIp     String
+  endIp       String
+  users       User[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("ip_pools")
+}
+
+model Device {
+  id                 String            @id @default(cuid())
+  name               String            @unique
+  description        String
+  vendor             DeviceVendor
+  model              String
+  kind               DeviceKind
+  ip                 String
+  nasIdentifier      String            @unique
+  nasIp              String
+  site               String
+  environment        DeviceEnvironment @default(PRODUCTION)
+  status             DeviceStatus      @default(PENDING)
+  lastSeenAt         DateTime?
+  secretCipher       String
+  secretRotatedAt    DateTime          @default(now())
+  authorizedGroups   Group[]           @relation("DeviceGroups")
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+
+  @@map("devices")
+}
+
+model Policy {
+  id          String       @id @default(cuid())
+  name        String
+  description String
+  scope       PolicyScope
+  conditions  Json         @default("[]")
+  action      PolicyAction
+  priority    Int          @default(100)
+  enabled     Boolean      @default(true)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  @@index([priority, enabled])
+  @@map("policies")
+}
+
+model AuditEvent {
+  id         String    @id @default(cuid())
+  at         DateTime  @default(now())
+  adminId    String?
+  actor      String
+  actorRole  String
+  action     String
+  target     String
+  result     AuditResult
+  ip         String
+  requestId  String    @unique
+  metadata   Json?
+  @@index([at])
+  @@index([target])
+  @@map("audit_events")
+}
+
+model Notification {
+  id        String    @id @default(cuid())
+  type      String
+  title     String
+  body      String
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([readAt, createdAt])
+  @@map("notifications")
+}
+
+model Setting {
+  id                     Int      @id @default(1)
+  organization           String   @default("Aurora Redes")
+  timezone               String   @default("America/Sao_Paulo")
+  sessionTimeoutMinutes  Int      @default(30)
+  mfaRequired            Boolean  @default(true)
+  passwordMinLength      Int      @default(14)
+  passwordRotationDays   Int      @default(90)
+  maxLoginAttempts       Int      @default(5)
+  auditRetentionDays     Int      @default(365)
+  sessionRetentionDays   Int      @default(90)
+  notificationsEmail     Boolean  @default(true)
+  notificationsWebhook   Boolean  @default(false)
+  webhookUrl             String?
+  updatedAt              DateTime @updatedAt
+
+  @@map("settings")
+}

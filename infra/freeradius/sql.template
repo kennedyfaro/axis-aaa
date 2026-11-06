@@ -1,0 +1,28 @@
+sql {
+	dialect = "postgresql"
+	driver = "rlm_sql_postgresql"
+	server = "__DB_HOST__"
+	port = 5432
+	login = "__DB_USER__"
+	password = "__DB_PASSWORD__"
+	radius_db = "__DB_NAME__"
+
+	acct_table1 = "radacct"
+	acct_table2 = "radacct"
+	postauth_table = "radpostauth"
+	authcheck_table = "radcheck"
+	groupcheck_table = "radgroupcheck"
+	authreply_table = "radreply"
+	groupreply_table = "radgroupreply"
+	usergroup_table = "radusergroup"
+
+	# Clientes sao resolvidos sob demanda pelo virtual server dynamic_clients.
+	# Assim um NAS cadastrado no painel entra em operacao sem restart.
+	read_clients = no
+	client_table = "nas"
+	group_attribute = "SQL-Group"
+
+	$INCLUDE ${modconfdir}/${.:name}/main/${dialect}/queries.conf
+
+
+}

@@ -1,0 +1,27 @@
+{
+  "name": "aaa-manager",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@11.24.0",
+  "scripts": {
+    "dev": "pnpm --filter @aaa/web dev",
+    "build": "pnpm --filter @aaa/api build && pnpm --filter @aaa/worker build && pnpm --filter @aaa/web build",
+    "start": "pnpm --filter @aaa/web start",
+    "lint": "pnpm --filter @aaa/web lint",
+    "typecheck": "pnpm --filter @aaa/api typecheck && pnpm --filter @aaa/worker typecheck && pnpm --filter @aaa/web typecheck",
+    "test": "pnpm --filter @aaa/api test && pnpm --filter @aaa/web test",
+    "test:e2e": "pnpm --filter @aaa/web test:e2e",
+    "test:security:p0": "bash scripts/security/p0-all.sh",
+    "test:security:p1": "bash scripts/security/p1-web.sh && bash scripts/security/p1-db.sh && bash scripts/security/p1-hardening.sh && bash scripts/security/p1-deps.sh",
+    "test:security:p2": "bash scripts/security/p2-all.sh",
+    "test:security:p3": "bash scripts/security/p3-web.sh && bash scripts/security/p3-db.sh && bash scripts/security/p3-backup.sh",
+    "test:security:tls": "bash scripts/security/p0-tls.sh",
+    "security:sbom": "node scripts/security/sbom.mjs",
+    "dev:api": "pnpm --filter @aaa/api dev",
+    "dev:worker": "pnpm --filter @aaa/worker dev",
+    "db:up": "docker compose up -d postgres redis",
+    "db:down": "docker compose down",
+    "db:seed": "pnpm --filter @aaa/api prisma:seed",
+    "db:bootstrap": "pnpm --filter @aaa/api bootstrap"
+  }
+}

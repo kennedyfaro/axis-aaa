@@ -1,0 +1,43 @@
+#  Autorizacao por equipamento.
+#
+#  - NAS cadastrado pelo IP de origem: vale apenas a lista de grupos dele.
+#  - NAS nao cadastrado: se existir um NAS padrao (0.0.0.0/0), vale a lista
+#    de grupos do padrao. Sem NAS padrao, a requisicao nem chega aqui porque
+#    o cliente dinamico nao encontra segredo.
+#
+#  Grupos de VPN (slug vpn-* ou Framed-Protocol=PPP) autorizam apenas sessoes
+#  PPP. Login de gerencia (WinBox, SSH, console) exige um grupo nao-VPN
+#  autorizado no NAS, como Acesso Full ou Acesso de Visualizacao.
+#
+device_access {
+	if (&Service-Type == Framed-User || &Framed-Protocol == PPP || &NAS-Port-Type == Virtual) {
+		update control {
+			&Tmp-String-0 := "vpn"
+		}
+	}
+	else {
+		update control {
+			&Tmp-String-0 := "mgmt"
+		}
+	}
+
+	if ("%{sql:SELECT COUNT(*) FROM radius_device_inventory WHERE nas_ip = '%{Packet-Src-IP-Address}'}" != "0") {
+		if ("%{sql:SELECT COUNT(*) FROM radius_device_access WHERE nas_ip = '%{Packet-Src-IP-Address}' AND login = '%{SQL-User-Name}' AND ('%{control:Tmp-String-0}' = 'vpn' OR NOT is_vpn)}" == "0") {
+			update reply {
+				&Reply-Message := "Seu grupo nao tem acesso a este equipamento"
+			}
+			reject
+		}
+	}
+
+	if ("%{sql:SELECT COUNT(*) FROM radius_device_inventory WHERE nas_ip = '%{Packet-Src-IP-Address}'}" == "0") {
+		if ("%{sql:SELECT COUNT(*) FROM radius_device_inventory WHERE nas_ip = '0.0.0.0/0'}" != "0") {
+			if ("%{sql:SELECT COUNT(*) FROM radius_device_access WHERE nas_ip = '0.0.0.0/0' AND login = '%{SQL-User-Name}' AND ('%{control:Tmp-String-0}' = 'vpn' OR NOT is_vpn)}" == "0") {
+				update reply {
+					&Reply-Message := "Seu grupo nao tem acesso ao NAS padrao"
+				}
+				reject
+			}
+		}
+	}
+}

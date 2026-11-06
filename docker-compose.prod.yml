@@ -1,0 +1,27 @@
+# Produção: TLS obrigatório, HSTS e cookies Secure.
+# Uso:
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+#
+# Certificados esperados em infra/nginx/tls/fullchain.pem e privkey.pem.
+name: aaa-manager
+
+services:
+  api:
+    environment:
+      COOKIE_SECURE: "true"
+      CORS_ORIGINS: ${PUBLIC_ORIGIN:-https://localhost}
+
+  nginx:
+    environment:
+      PUBLIC_HOST: ${PUBLIC_HOST:-localhost}
+    command:
+      - /bin/sh
+      - -c
+      - >-
+        envsubst '$${PUBLIC_HOST}' < /etc/nginx/nginx.conf.template > /tmp/nginx.conf &&
+        exec nginx -c /tmp/nginx.conf -g 'daemon off;'
+    volumes:
+      - ./infra/nginx/nginx.tls.conf:/etc/nginx/nginx.conf.template:ro
+      - ./infra/nginx/tls:/etc/nginx/tls:ro
+    ports:
+      - "${HTTPS_PORT:-443}:443"

@@ -1,0 +1,12 @@
+# Clientes de desenvolvimento. Em producao, restrinja o CIDR e rotacione o segredo.
+client radtest {
+	ipaddr = 127.0.0.1
+	secret = __CLIENT_SECRET__
+	shortname = radtest
+	# Controlado por RADIUS_REQUIRE_MA (true por padrão).
+	require_message_authenticator = __REQUIRE_MA__
+}
+
+# NAS reais sao carregados dinamicamente da tabela `nas`, cada um com seu
+# proprio segredo. Nao existe cliente estatico para as redes internas: um
+# equipamento so e aceito depois de cadastrado no painel.

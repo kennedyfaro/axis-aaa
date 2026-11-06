@@ -1,0 +1,42 @@
+# -*- text -*-
+#
+#  Clientes RADIUS dinamicos.
+#
+#  Qualquer origem IPv4 e encaminhada para o virtual server "dynamic_clients",
+#  que procura o NAS na tabela `nas`.  O shared secret continua obrigatorio:
+#  um IP nao cadastrado (ou com segredo diferente) e descartado.
+#
+#  Efeito pratico: cadastrar um equipamento no painel ja o habilita no RADIUS,
+#  sem reiniciar o servico.  O cache e renovado a cada 60 segundos, o
+#  que tambem limita a defasagem apos rotacao de segredo ou remocao do NAS.
+#
+#  O fallback para 0.0.0.0/0 e desabilitado por padrao. Para reabilitar
+#  conscientemente, defina RADIUS_ALLOW_WILDCARD_NAS=true e cadastre um
+#  unico NAS curinga no painel. O modo recomendado e IP exato por NAS.
+#
+client dynamic {
+	ipaddr = 0.0.0.0/0
+	dynamic_clients = dynamic_clients
+	lifetime = 60
+	# Mitiga Blast-RADIUS (CVE-2024-3596) quando RADIUS_REQUIRE_MA=true.
+	require_message_authenticator = __REQUIRE_MA__
+}
+
+server dynamic_clients {
+	authorize {
+		#  Procura apenas o IP exato. O placeholder __WILDCARD_NAS__ vira
+		#  0.0.0.0/0 apenas quando RADIUS_ALLOW_WILDCARD_NAS=true.
+		if ("%{sql: SELECT nasname FROM nas WHERE nasname IN ('%{Packet-Src-IP-Address}', '__WILDCARD_NAS__') ORDER BY (nasname = '%{Packet-Src-IP-Address}') DESC LIMIT 1}") {
+			update control {
+				&FreeRADIUS-Client-IP-Address = "%{Packet-Src-IP-Address}"
+				&FreeRADIUS-Client-Shortname = "%{sql: SELECT shortname FROM nas WHERE nasname IN ('%{Packet-Src-IP-Address}', '__WILDCARD_NAS__') ORDER BY (nasname = '%{Packet-Src-IP-Address}') DESC LIMIT 1}"
+				&FreeRADIUS-Client-Secret = "%{sql: SELECT secret FROM nas WHERE nasname IN ('%{Packet-Src-IP-Address}', '__WILDCARD_NAS__') ORDER BY (nasname = '%{Packet-Src-IP-Address}') DESC LIMIT 1}"
+				&FreeRADIUS-Client-NAS-Type = "other"
+				# Vale para o cliente criado dinamicamente a partir da
+				# tabela `nas`, não apenas para o bloco `client dynamic`.
+				&FreeRADIUS-Client-Require-MA := __REQUIRE_MA__
+			}
+		}
+		ok
+	}
+}

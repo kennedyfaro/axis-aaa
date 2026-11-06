@@ -1,0 +1,338 @@
+name: aaa-manager
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-aaa}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-aaa_manager}
+      POSTGRES_APP_PASSWORD: ${POSTGRES_APP_PASSWORD:?defina POSTGRES_APP_PASSWORD}
+      POSTGRES_WORKER_PASSWORD: ${POSTGRES_WORKER_PASSWORD:?defina POSTGRES_WORKER_PASSWORD}
+      POSTGRES_RADIUS_PASSWORD: ${POSTGRES_RADIUS_PASSWORD:?defina POSTGRES_RADIUS_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infra/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-aaa} -d ${POSTGRES_DB:-aaa_manager}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETGID
+      - SETUID
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1g
+    networks:
+      - internal
+    restart: unless-stopped
+    logging: *default-logging
+
+  redis:
+    image: redis:8-alpine
+    # Sem persistência em disco: desafios MFA/rate-limit ficam apenas em memória.
+    # A fila do worker é recriada no startup; não há segredo em AOF/RDB.
+    command: ["redis-server", "--appendonly", "no", "--save", ""]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETGID
+      - SETUID
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256m
+    networks:
+      - internal
+    restart: unless-stopped
+    logging: *default-logging
+
+  migrate:
+    image: aaa-manager-api
+    working_dir: /app/apps/api
+    command:
+      - sh
+      - -c
+      - >-
+        ./node_modules/.bin/prisma migrate deploy &&
+        ./node_modules/.bin/prisma db execute --file /app/infra/postgres/runtime-grants.sql --schema prisma/schema.prisma &&
+        ./node_modules/.bin/tsx scripts/encrypt-totp-secrets.ts
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER:-aaa}:${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-aaa_manager}?schema=public
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?defina ENCRYPTION_KEY}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    networks:
+      - internal
+    restart: "no"
+    logging: *default-logging
+
+  bootstrap:
+    image: aaa-manager-api
+    profiles: ["tools"]
+    working_dir: /app/apps/api
+    command: ["sh", "-c", "./node_modules/.bin/tsx scripts/bootstrap-admin.ts"]
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://aaa_app:${POSTGRES_APP_PASSWORD:?defina POSTGRES_APP_PASSWORD}@postgres:5432/${POSTGRES_DB:-aaa_manager}?schema=public
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?defina ENCRYPTION_KEY}
+      BOOTSTRAP_ADMIN_NAME: ${BOOTSTRAP_ADMIN_NAME:-Administrador}
+      BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL:-admin@aaa.local}
+      BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-}
+      BOOTSTRAP_ADMIN_TOTP_SECRET: ${BOOTSTRAP_ADMIN_TOTP_SECRET:-}
+      BOOTSTRAP_TOTP_OUTPUT: /bootstrap/totp.txt
+    volumes:
+      - ./bootstrap:/bootstrap
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    networks:
+      - internal
+    restart: "no"
+    logging: *default-logging
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    image: aaa-manager-api
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DATABASE_URL: postgresql://aaa_app:${POSTGRES_APP_PASSWORD:?defina POSTGRES_APP_PASSWORD}@postgres:5432/${POSTGRES_DB:-aaa_manager}?schema=public
+      REDIS_URL: redis://redis:6379
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?defina JWT_ACCESS_SECRET}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?defina ENCRYPTION_KEY}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8080}
+      ENABLE_API_DOCS: ${ENABLE_API_DOCS:-false}
+      RADIUS_COA_PORT: ${RADIUS_COA_PORT:-3799}
+      RADIUS_COA_TIMEOUT_MS: ${RADIUS_COA_TIMEOUT_MS:-2000}
+      RADIUS_ALLOW_WILDCARD_NAS: ${RADIUS_ALLOW_WILDCARD_NAS:-false}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/v1/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 20s
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512m
+    networks:
+      - public
+      - internal
+    restart: unless-stopped
+    logging: *default-logging
+
+  worker:
+    build:
+      context: .
+      dockerfile: apps/worker/Dockerfile
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://aaa_worker:${POSTGRES_WORKER_PASSWORD:?defina POSTGRES_WORKER_PASSWORD}@postgres:5432/${POSTGRES_DB:-aaa_manager}?schema=public
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      api:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256m
+    networks:
+      - internal
+    restart: unless-stopped
+    logging: *default-logging
+
+  freeradius:
+    build:
+      context: infra/freeradius
+      dockerfile: Dockerfile
+    environment:
+      RADIUS_DB_HOST: postgres
+      RADIUS_DB_USER: aaa_radius
+      RADIUS_DB_PASSWORD: ${POSTGRES_RADIUS_PASSWORD:?defina POSTGRES_RADIUS_PASSWORD}
+      RADIUS_DB_NAME: ${POSTGRES_DB:-aaa_manager}
+      RADIUS_CLIENT_SECRET: ${RADIUS_CLIENT_SECRET:?defina RADIUS_CLIENT_SECRET}
+      RADIUS_REQUIRE_MA: ${RADIUS_REQUIRE_MA:-true}
+      RADIUS_ALLOW_WILDCARD_NAS: ${RADIUS_ALLOW_WILDCARD_NAS:-false}
+    ports:
+      - "${RADIUS_BIND_IP:-0.0.0.0}:1812:1812/udp"
+      - "${RADIUS_BIND_IP:-0.0.0.0}:1813:1813/udp"
+    depends_on:
+      api:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETGID
+      - SETUID
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512m
+    networks:
+      - internal
+      - radius_edge
+    restart: unless-stopped
+    logging: *default-logging
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    environment:
+      NODE_ENV: production
+      PORT: 3100
+      HOSTNAME: 0.0.0.0
+      API_INTERNAL_URL: http://api:3000
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3100/login').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 20s
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512m
+    networks:
+      - public
+    restart: unless-stopped
+    logging: *default-logging
+
+  nginx:
+    image: nginx:1.27-alpine
+    volumes:
+      - ./infra/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    ports:
+      - "${HTTP_PORT:-8080}:80"
+    depends_on:
+      web:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+      - CHOWN
+      - DAC_OVERRIDE
+      - SETGID
+      - SETUID
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 128m
+    networks:
+      - public
+    restart: unless-stopped
+    logging: *default-logging
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  public:
+    ipam:
+      config:
+        - subnet: 192.168.240.0/24
+  internal:
+    internal: true
+    ipam:
+      config:
+        - subnet: 192.168.241.0/24
+  radius_edge:
+    ipam:
+      config:
+        - subnet: 192.168.242.0/24

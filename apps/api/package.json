@@ -1,0 +1,48 @@
+{
+  "name": "@aaa/api",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "tsc -p tsconfig.build.json && node dist/main.js",
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/main.js",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate dev",
+    "prisma:deploy": "prisma migrate deploy",
+    "prisma:seed": "tsx prisma/seed.ts",
+    "bootstrap": "tsx scripts/bootstrap-admin.ts",
+    "mfa:code": "tsx scripts/mfa-code.ts"
+  },
+  "dependencies": {
+    "@nestjs/common": "11.2.8",
+    "@nestjs/config": "4.0.4",
+    "@nestjs/core": "11.2.8",
+    "@nestjs/jwt": "11.0.2",
+    "@nestjs/platform-express": "11.2.8",
+    "@nestjs/swagger": "11.4.7",
+    "@node-rs/argon2": "2.2.2",
+    "@prisma/client": "6.19.3",
+    "class-transformer": "0.5.1",
+    "class-validator": "0.15.1",
+    "cookie-parser": "1.4.7",
+    "dotenv": "16.6.1",
+    "helmet": "8.3.0",
+    "ioredis": "5.11.1",
+    "otplib": "12.0.1",
+    "rate-limiter-flexible": "11.2.3",
+    "reflect-metadata": "0.2.2",
+    "rxjs": "7.8.2"
+  },
+  "devDependencies": {
+    "@nestjs/testing": "11.2.8",
+    "@types/cookie-parser": "1.4.9",
+    "@types/express": "5.0.6",
+    "@types/node": "26.6.5",
+    "prisma": "6.19.3",
+    "tsx": "4.23.15",
+    "typescript": "5.9.3",
+    "vitest": "5.0.5"
+  }
+}
